@@ -4,6 +4,8 @@ import bpy_extras
 import gpu
 import gpu_extras.batch
 import copy
+import mathutils
+
 
 bl_info = {
     "name":"レベルエディタ",
@@ -14,6 +16,7 @@ bl_info = {
     "description":"レベルエディタ",
     "warning":"",
     "wiki_url":"",
+    "tracker_url": "",
     "category":"Object"
 }
 
@@ -24,6 +27,59 @@ def draw_menu_manual(self,context):
 
     #トップバーの「エディターメニュー」に項目（オペレータ）を追加
     self.layout.operator("wm.url_open_preset",text="Manual",icon="HELP")
+
+    
+#Add-On有効時コールバック
+def register():
+    # Blenderにクラスを登録
+    for cls in classes:
+        bpy.utils.register_class(cls)
+    
+    #メニューに項目を追加
+    bpy.types.TOPBAR_MT_editor_menus.append(TOPBAR_MT_my_menu.submenu)
+    #3Dビューに描画関数を追加
+    DrawCollider.handle = bpy.types.SpaceView3D.draw_handler_add(DrawCollider.draw_collider, (), 'WINDOW', 'POST_VIEW')
+    print("レべルエディタが有効化されました。")
+    
+#Add-On無効化時コールバック
+def unregister():
+    #メニューから項目を削除
+    bpy.types.TOPBAR_MT_editor_menus.remove(TOPBAR_MT_my_menu.submenu)
+    #3Dビューから描画関数を削除
+    bpy.types.SpaceView3D.draw_handler_remove(DrawCollider.handle, 'WINDOW')
+    
+    # Blenderからクラスを削除
+    for cls in classes:
+        bpy.utils.unregister_class(cls)
+    print("レべルエディタが無効化されました。")
+    
+#トップバーの拡張メニュー
+class TOPBAR_MT_my_menu(bpy.types.Menu):
+    #Blenderがクラスを識別する為の固有の文字列
+    bl_idname = "TOPBAR_MT_my_menu"
+    #メニューのラベルとして表示される文字列
+    bl_label = "MyMenu"
+    #著作表示用の文字列
+    bl_description = "拡張メニュー by " + bl_info["author"]
+    
+    #サブメニューの描画
+    def draw(self, context):
+        
+        #トップバーの「エディターメニュー」に項目（オペレータ）を追加
+        self.layout.operator(MYADDON_OT_stretch_vertex.bl_idname, 
+            text=MYADDON_OT_stretch_vertex.bl_label)
+    
+        self.layout.operator(MYADDON_OT_create_ico_sphere.bl_idname, 
+            text=MYADDON_OT_create_ico_sphere.bl_label)
+            
+        self.layout.operator(MYADDON_OT_export_scene.bl_idname, 
+            text=MYADDON_OT_export_scene.bl_label)
+            
+    #既存のメニューにサブメニューを追加
+    def submenu(self, context):
+        
+        #ID指定でサブメニューを追加
+        self.layout.menu(TOPBAR_MT_my_menu.bl_idname)
 
 #オペレータ　頂点を伸ばす
 class MYADDON_OT_stretch_vertex(bpy.types.Operator):
@@ -94,6 +150,14 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
         #カスタムプロパティ'file_name'
         if "file_name" in object:
             self.write_and_print(file,indent+"N %s"%object["file_name"])
+        #カスタムプロパティ'collision'
+        if "collider" in object:
+            self.write_and_print(file, indent + "C %s" % object["collider"])
+            temp_str = indent + "CC %f %f %f"
+            temp_str %= (object["collider_center"][0], object["collider_center"][1], object["collider_center"][2])
+            self.write_and_print(file, temp_str)
+            temp_str = indent + "CS %f %f %f"
+            temp_str %= (object["collider_size"][0], object["collider_size"][1], object["collider_size"][2])
         self.write_and_print(file,indent+'END')
         self.write_and_print(file,'')    
 
@@ -155,6 +219,8 @@ class OBJECT_PT_file_name(bpy.types.Panel):
             #プロパティがなければ、プロパティ追加ボタンを表示
             self.layout.operator(MYADDON_OT_add_filename.bl_idname)
 
+            self.layout.operater(MYADDON_OT_add_colliser.bl_idname)
+
 #オペレータ カスタムプロパティ['file_name']追加
 class MYADDON_OT_add_filename(bpy.types.Operator):
     bl_idname="myaddon.myaddon_ot_sdd_file"
@@ -199,17 +265,36 @@ class DrawCollider:
 
         #現在シーンのオブジェクトリストを走査
         for object in bpy.context.scene.objects:
+
+            #コライダープロパティがなければ、描画をスキップ
+            if not "collider" in object:
+                continue
+
+            #中心点、サイズの変数を宣言
+            center = mathutils.Vector((0,0,0))
+            size = mathutils.Vector((2,2,2))
+
+            #プロパティから値を取得
+            center[0]=object["collider_center"][0]
+            center[1]=object["collider_center"][1]
+            center[2]=object["collider_center"][2]
+            size[0]=object["collider_size"][0]
+            size[1]=object["collider_size"][1]
+            size[2]=object["collider_size"][2]            
+
             #追加前の頂点数
             start=len(vertices["pos"])
 
             #Boxの8頂点分回す
             for offset in offsets:
                 #オブジェクトの中心座標をコピー
-                pos=copy.copy(object.location)
+                pos=copy.copy(center)
                 #中心点を基準に拡張点ごとにずらす
                 pos[0]+=offset[0]*size[0]
                 pos[1]+=offset[1]*size[1]
                 pos[2]+=offset[2]*size[2]
+                #ローカル座標からワールド座標に変換
+                pos = object.matrix_world @ pos
                 #頂点データリストに座標を追加
                 vertices['pos'].append(pos)
                 #前面を構成する辺の頂点インデックス
@@ -241,39 +326,40 @@ class DrawCollider:
         #描画
         batch.draw(shader)
 
-# トップバーの拡張メニュー
-class TOPBAR_MT_my_menu(bpy.types.Menu):
+#オペレーター　カスタムプロパティ追加
+class MYADDON_OT_add_collider(bpy.types.Operator):
+    bl_idname = "myaddon.myaddon_ot_add_collider"
+    bl_label = "コライダー 追加"
+    bl_description = "['collider']カスタムプロパティを追加します"
+    bl_options = {"REGISTER", "UNDO"}
 
-    # Blenderがクラスを識別するための固有の文字列
-    bl_idname = "TOPBAR_MT_my_menu"
+    def execute(self, context):
+        context.object["collider"] = "BOX"
+        context.object["collider_center"] = mathutils.Vector((0,0,0))
+        context.object["collider_size"] = mathutils.Vector((2,2,2))
+        return{"FINISHED"}
+    
+#パネル　コライダー
+class OBJECT_PT_collider(bpy.types.Panel):
+    bl_idname = "OBJECT_PT_collider"
+    bl_lavel = "Collider"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "object"
 
-    # メニューのラベルとして表示される文字列
-    bl_label = "MyMenu"
-
-    # 警告表示用の文字列
-    bl_description = "拡張メニュー by " + bl_info["author"]
-
-    # サブメニューの描画
+    #サブメニューの描画
     def draw(self, context):
+        
+        #パネルに項目を追加
+        if "collider" in context.object:
+            #すでにプロパティがあれば、プロパティを表示
+            self.layout.prop(context.object,'["collider"]', text="Type")
+            self.layout.prop(context.object,'["collider_center"]', text="Center")
+            self.layout.prop(context.object,'["collider_size"]', text="Size")
 
-        # トップバーの「エディタメニュー」に項目(オペレータ)を追加
-        # 頂点を伸ばす
-        self.layout.operator(
-           MYADDON_OT_stretch_vertex.bl_idname,
-           text=MYADDON_OT_stretch_vertex.bl_label
-        )
-
-        # ICO球生成
-        self.layout.operator(
-             MYADDON_OT_create_ico_sphere.bl_idname,
-            text=MYADDON_OT_create_ico_sphere.bl_label
-        )
-
-        # シーン出力
-        self.layout.operator(
-            MYADDON_OT_export_scene.bl_idname,
-            text=MYADDON_OT_export_scene.bl_label
-        )
+        else:
+            #プロパティがなければ、プロパティ追加ボタンを表示
+            self.layout.operator(MYADDON_OT_add_collider.bl_idname)
 
 # 既存のメニューにサブメニューを追加
 def submenu(self, context):
@@ -289,30 +375,5 @@ classes = (
     MYADDON_OT_add_filename,
     TOPBAR_MT_my_menu,
     OBJECT_PT_file_name,
+    MYADDON_OT_add_collider,
 )
-
-#アドオン有効化時コールバック
-def register():
-    #Blenderにクラスを登録
-    for cls in classes:
-        bpy.utils.register_class(cls)
-
-    #メニュー項目を追加
-    bpy.types.TOPBAR_MT_editor_menus.append(submenu)
-    
-    #3Dビューに描画関数を追加
-    DrawCollider.handle=bpy.types.SpaceView3D.draw_handler_add(DrawCollider.draw_collider,(),"WINDOW","POST_VIEW")
-    print("レベルエディタが有効化されました")
-
-#アドオン無効化時コールバック
-def unregister():
-    #メニューから項目を削除
-    bpy.types.TOPBAR_MT_editor_menus.remove(submenu)
-    #3Dビューから描画関数を削除
-    bpy.types.SpaceView3D.draw_handler_remove(DrawCollider.handle,"WINDOW")
-
-    #Blenderからクラスを削除
-    for cls in classes:
-        bpy.utils.unregister_class(cls)
-
-    print("レベルエディタが無効化されました")
