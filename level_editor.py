@@ -6,7 +6,6 @@ import gpu_extras.batch
 import copy
 import mathutils
 
-
 bl_info = {
     "name":"レベルエディタ",
     "author":"tomohiro byodo",
