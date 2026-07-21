@@ -1,10 +1,11 @@
-import   bpy
+import bpy
 import math
 import bpy_extras
 import gpu
 import gpu_extras.batch
-import copy
 import mathutils
+import copy
+import json
 
 bl_info = {
     "name":"レベルエディタ",
@@ -19,6 +20,7 @@ bl_info = {
     "category":"Object"
 }
 
+#test
 #メニュー項目描画
 def draw_menu_manual(self,context):
     #self:呼び出し元のクラスインスタンス。C++でいうthisポインタ
@@ -27,6 +29,7 @@ def draw_menu_manual(self,context):
     #トップバーの「エディターメニュー」に項目（オペレータ）を追加
     self.layout.operator("wm.url_open_preset",text="Manual",icon="HELP")
 
+    
     
 #Add-On有効時コールバック
 def register():
@@ -115,7 +118,96 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
     bl_label = "シーン出力"
     bl_description = "シーン情報をExportします"
     #出力するファイルの拡張子
-    filename_ext=".scene"
+    filename_ext=".json"
+
+    def export_json(self):
+        """JSON形式でファイルに出力"""
+
+        #保存する情報をまとめるdict
+        json_object_root = dict()
+
+        #ノード名
+        json_object_root["name"] = "scene"
+        #オブジェクトリストを作成
+        json_object_root["objects"] = list()
+        
+        #Todo: シーン内の全オブジェクト走査してパック
+        for object in bpy.context.scene.objects:
+            
+            #親オブジェクトがあるものじゃスキップ
+            if(object.parent):
+                continue
+
+            #シーン直下のオブジェクトをルートノードとし、再起関数で走査
+            self.parse_scene_recursive_json(json_object_root["objects"],object,0)
+
+        #オブジェクトをJSON文字列にエンコード
+        json_text = json.dumps(json_object_root,ensure_ascii=False,cls=json.JSONEncoder,indent=4)
+
+        #コンソールに表示してみる
+        print(json_text)
+
+        #ファイルをテキスト形式で書き出し用にオープン
+        #スコープを抜けると自動的にクローズされる
+        with open(self.filepath, "wt", encoding="utf-8") as file:
+
+            #ファイルに文字列を書き込む
+            file.write(json_text)
+
+            def parse_scene_recursive_json(self,data_parent, object, level):
+
+        #シーンのオブジェクト1個分のjsonオブジェクト生成
+        json_object = dict()
+
+        #オブジェクト種類
+        json_object["type"] = object.type
+
+        #オブジェクト名
+        json_object["name"] = object.name
+
+        #その他・その他情報をパック
+        #オブジェクトのローカル・トランスフォームから
+        #平行移動、回転、スケールを抽出
+        trans, rot, scale = object.matrix_local.decompose()
+        #回転を Quaternion から Euler（3軸での回転角）に変換
+        rot = rot.to_euler()
+        #ラジアンから度数法に変換
+        rot.x = math.degrees(rot.x)
+        rot.y = math.degrees(rot.y)
+        rot.z = math.degrees(rot.z)
+
+        #トランスフォーム情報をディクショナリに登録
+        transform = dict()
+        transform["translation"] = (trans.x, trans.y, trans.z)
+        transform["rotation"] = (rot.x, rot.y, rot.z)
+        transform["scaling"] = (scale.x, scale.y, scale.z)
+        #まとめて1個分のjsonオブジェクトに登録
+        json_object["transform"] = transform
+
+        #カスタムプロパティ 'file_name'
+        if "file_name" in object:
+            json_object["file_name"] = object["file_name"]
+
+        #カスタムプロパティ 'collider'
+        if "collider" in object:
+            collider = dict()
+            collider["type"] = object["collider"]
+            collider["center"] = object["collider_center"].to_list()
+            collider["size"] = object["collider_size"].to_list()
+            json_object["collider"] = collider
+
+        #1個分のjsonオブジェクトを親オブジェクトに登録
+        data_parent.append(json_object)
+
+        #丁度の・直接の子供リストを走査
+        #子ノードがあれば
+        if len(object.children) > 0:
+            #子ノードリストを作成
+            json_object["children"] = list()
+
+            #子ノードへ進む(深さが1上がる)
+            for child in object.children:
+                self.parse_scene_recursive_json(json_object["children"], child, level + 1)
 
     def write_and_print(self,file,str):
         print(str)
@@ -190,7 +282,7 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
         print("シーン情報をExportします")
 
         #ファイルに出力
-        self.export()
+        self.export_json()
 
         print("シーン情報をExportしました")
 
@@ -218,11 +310,9 @@ class OBJECT_PT_file_name(bpy.types.Panel):
             #プロパティがなければ、プロパティ追加ボタンを表示
             self.layout.operator(MYADDON_OT_add_filename.bl_idname)
 
-            self.layout.operater(MYADDON_OT_add_colliser.bl_idname)
-
 #オペレータ カスタムプロパティ['file_name']追加
 class MYADDON_OT_add_filename(bpy.types.Operator):
-    bl_idname="myaddon.myaddon_ot_sdd_file"
+    bl_idname= "myaddon.myaddon_ot_add_filename"
     bl_label="FileName 追加"
     bl_description="['file_name']カスタムプロパティを追加します"
     bl_options={"REGISTER","UNDO"}
@@ -341,7 +431,7 @@ class MYADDON_OT_add_collider(bpy.types.Operator):
 #パネル　コライダー
 class OBJECT_PT_collider(bpy.types.Panel):
     bl_idname = "OBJECT_PT_collider"
-    bl_lavel = "Collider"
+    bl_label = "Collider"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "object"
@@ -375,4 +465,5 @@ classes = (
     TOPBAR_MT_my_menu,
     OBJECT_PT_file_name,
     MYADDON_OT_add_collider,
+    OBJECT_PT_collider,
 )
