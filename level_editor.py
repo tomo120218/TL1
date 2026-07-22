@@ -154,7 +154,7 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
             #ファイルに文字列を書き込む
             file.write(json_text)
 
-            def parse_scene_recursive_json(self,data_parent, object, level):
+    def parse_scene_recursive_json(self,data_parent, object, level):
 
         #シーンのオブジェクト1個分のjsonオブジェクト生成
         json_object = dict()
